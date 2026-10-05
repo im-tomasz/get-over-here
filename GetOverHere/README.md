@@ -1,5 +1,7 @@
 # Get Over Here!
 
+<img src="Assets/icon-256.png" alt="Get Over Here! icon: a pixel-art harpoon" width="128">
+
 A small Windows app living in the notification area. When you touch the secondary screen (an Android tablet used through **SuperDisplay**), the mouse cursor **and the keyboard focus** come right back to where they were.
 
 - The **finger** triggers the return.
@@ -11,9 +13,9 @@ A small Windows app living in the notification area. When you touch the secondar
 - Starts with Windows (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\GetOverHere`).
 - **Double-click** the icon: pause / resume.
 - **Right-click** the icon for the options:
-  - *Remettre aussi le focus clavier*: the window you were typing in stays active after a touch.
-  - *Mode zéro mouvement (expérimental)*: blocks the cursor moves caused by touch. Modern apps still receive the touch; some legacy apps may stop responding to it.
-  - *Journal de diagnostic*: writes every event to `%APPDATA%\GetOverHere\diag.log`.
+  - *Also restore keyboard focus*: the window you were typing in stays active after a touch.
+  - *Zero-move mode (experimental)*: blocks the cursor moves caused by touch. Modern apps still receive the touch; some legacy apps may stop responding to it.
+  - *Diagnostic log*: writes every event to `%APPDATA%\GetOverHere\diag.log`.
 
 Settings: `%APPDATA%\GetOverHere\settings.json`.
 
@@ -48,6 +50,31 @@ Nothing expensive is done inside the mouse hook itself: Windows would stall (~30
 | `MonitorInfo.cs` | Finds the SuperDisplay monitor |
 | `Settings.cs`, `Startup.cs`, `LegacyMigration.cs`, `DiagnosticLog.cs` | Persistence, startup entry, upgrade, log |
 | `TrayApp.cs`, `Program.cs`, `AppInfo.cs` | Notification-area UI, entry point, app identity |
+| `AppIcons.cs`, `TaskbarTheme.cs` | Embedded icons, light / dark taskbar detection |
+
+### Icon
+
+The icon is a pixel-art harpoon. Its source lives in `Assets/`:
+
+| File | Role |
+|---|---|
+| `icon-source.jpg` | Original artwork (JPEG, white background) |
+| `icon-pixels.png` | Clean 32x13 pixel art extracted from it (transparent background, exact colours) |
+| `GetOverHere.ico` / `GetOverHere-paused.ico` | Generated icons for a light taskbar, 16 to 256 px (the paused one is greyed out) |
+| `GetOverHere-dark.ico` / `GetOverHere-dark-paused.ico` | Same for a dark taskbar: colours inverted, white harpoon |
+| `icon-256.png` / `icon-256-dark.png` | Large previews |
+
+`GetOverHere.ico` is the executable's icon; the four `.ico` files are embedded and used in the notification area. Empty cells enclosed by the outline are painted white, as in the original drawing.
+
+The notification-area icon follows the taskbar theme (`SystemUsesLightTheme` in `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`, see `TaskbarTheme.cs`), and switches live when Windows changes between light and dark mode. In the dark variant the navy outline and the white interior swap places, so the harpoon is white; the other colours (blue accents) get their lightness inverted and keep their hue.
+
+To regenerate the icons after editing `icon-pixels.png`:
+
+```bash
+pwsh GetOverHere/Assets/make-icons.ps1
+```
+
+(`-Resample` re-extracts `icon-pixels.png` from the JPEG.)
 
 ## Building
 

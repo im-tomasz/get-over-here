@@ -32,6 +32,23 @@ public class ProjectConfigurationTests
     }
 
     [Fact]
+    public void App_UsesTheHarpoonIcon_ForTheExecutable()
+    {
+        Assert.Equal(@"Assets\GetOverHere.ico", Property("ApplicationIcon"));
+    }
+
+    [Fact]
+    public void App_EmbedsBothNotificationAreaIcons()
+    {
+        var names = typeof(AppIcons).Assembly.GetManifestResourceNames();
+
+        Assert.Contains(AppIcons.ActiveResource, names);
+        Assert.Contains(AppIcons.PausedResource, names);
+        Assert.Contains(AppIcons.DarkActiveResource, names);
+        Assert.Contains(AppIcons.DarkPausedResource, names);
+    }
+
+    [Fact]
     public void TestProcess_RunsWithTheSameDpiMode() =>
         Assert.Equal(HighDpiMode.PerMonitorV2, Application.HighDpiMode);
 }

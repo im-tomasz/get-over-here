@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Drawing.Drawing2D;
 using Microsoft.Win32;
 
 namespace GetOverHere;
@@ -14,8 +13,9 @@ internal sealed class TrayApp : ApplicationContext
     private readonly RawTouchInput _rawTouch;
     private readonly ControlDispatcher _dispatcher;
     private readonly NotifyIcon _tray;
-    private readonly Icon _iconOn = CreateIcon(active: true);
-    private readonly Icon _iconOff = CreateIcon(active: false);
+    private Icon _iconOn = null!;
+    private Icon _iconOff = null!;
+    private bool? _iconsDark; // theme the current icons were loaded for
 
     private readonly ToolStripMenuItem _enabledItem;
     private readonly ToolStripMenuItem _focusItem;
@@ -29,6 +29,7 @@ internal sealed class TrayApp : ApplicationContext
         var migration = LegacyMigration.Default.Run();
 
         _settings = Settings.Load();
+        LoadIconsForTheme();
 
         DiagnosticLog.Enabled = _settings.DiagnosticLog;
         DiagnosticLog.Start();
@@ -57,14 +58,14 @@ internal sealed class TrayApp : ApplicationContext
         _hook.Install();
         _rawTouch = new RawTouchInput(_guard.OnRawTouch);
 
-        _enabledItem = new ToolStripMenuItem("Activé", null, (_, _) => ToggleEnabled()) { Font = new Font(SystemFonts.MenuFont!, FontStyle.Bold) };
-        _focusItem = new ToolStripMenuItem("Remettre aussi le focus clavier", null, (_, _) => Toggle(s => s.RestoreFocus = !s.RestoreFocus));
-        _zeroMoveItem = new ToolStripMenuItem("Mode zéro mouvement (expérimental)", null, (_, _) => Toggle(s => s.ZeroMoveMode = !s.ZeroMoveMode))
+        _enabledItem = new ToolStripMenuItem("Enabled", null, (_, _) => ToggleEnabled()) { Font = new Font(SystemFonts.MenuFont!, FontStyle.Bold) };
+        _focusItem = new ToolStripMenuItem("Also restore keyboard focus", null, (_, _) => Toggle(s => s.RestoreFocus = !s.RestoreFocus));
+        _zeroMoveItem = new ToolStripMenuItem("Zero-move mode (experimental)", null, (_, _) => Toggle(s => s.ZeroMoveMode = !s.ZeroMoveMode))
         {
-            ToolTipText = "Bloque les mouvements de curseur dus au tactile.\nLes applis modernes reçoivent quand même le toucher, certaines vieilles applis non.",
+            ToolTipText = "Blocks cursor moves caused by touch.\nModern apps still receive the touch, some older apps may not.",
         };
-        _startupItem = new ToolStripMenuItem("Lancer au démarrage de Windows", null, (_, _) => ToggleStartup());
-        _diagItem = new ToolStripMenuItem("Journal de diagnostic", null, (_, _) => ToggleDiagnostic());
+        _startupItem = new ToolStripMenuItem("Start with Windows", null, (_, _) => ToggleStartup());
+        _diagItem = new ToolStripMenuItem("Diagnostic log", null, (_, _) => ToggleDiagnostic());
 
         var menu = new ContextMenuStrip { ShowItemToolTips = true };
         menu.Items.AddRange(new ToolStripItem[]
@@ -76,10 +77,10 @@ internal sealed class TrayApp : ApplicationContext
             _startupItem,
             new ToolStripSeparator(),
             _diagItem,
-            new ToolStripMenuItem("Ouvrir le journal", null, (_, _) => OpenLog()),
-            new ToolStripMenuItem("Ouvrir le dossier des réglages", null, (_, _) => Shell(Settings.Folder)),
+            new ToolStripMenuItem("Open log", null, (_, _) => OpenLog()),
+            new ToolStripMenuItem("Open settings folder", null, (_, _) => Shell(Settings.Folder)),
             new ToolStripSeparator(),
-            new ToolStripMenuItem("Quitter", null, (_, _) => ExitThread()),
+            new ToolStripMenuItem("Quit", null, (_, _) => ExitThread()),
         });
         menu.Opening += (_, _) => RefreshMenu();
 
@@ -90,11 +91,12 @@ internal sealed class TrayApp : ApplicationContext
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         SystemEvents.SessionSwitch += OnSessionSwitch;
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         if (_settings.IsFirstRun)
         {
-            _tray.ShowBalloonTip(5000, $"{AppInfo.DisplayName} est actif",
-                "Touchez la tablette : le curseur revient tout seul. Clic droit sur l'icône pour les options.", ToolTipIcon.Info);
+            _tray.ShowBalloonTip(5000, $"{AppInfo.DisplayName} is running",
+                "Tap the tablet: the cursor comes back on its own. Right-click the icon for options.", ToolTipIcon.Info);
         }
     }
 
@@ -136,6 +138,34 @@ internal sealed class TrayApp : ApplicationContext
         RefreshMenu();
     }
 
+    /// <summary>
+    /// Loads the icon pair matching the taskbar theme: white harpoon on a dark taskbar, navy harpoon on a light one.
+    /// Returns true when the theme changed since the last load.
+    /// </summary>
+    private bool LoadIconsForTheme()
+    {
+        bool dark = TaskbarTheme.Default.IsDark();
+        if (_iconsDark == dark) return false;
+
+        var (oldOn, oldOff) = (_iconOn, _iconOff);
+        _iconOn = AppIcons.Load(active: true, dark, SystemInformation.SmallIconSize);
+        _iconOff = AppIcons.Load(active: false, dark, SystemInformation.SmallIconSize);
+        _iconsDark = dark;
+        oldOn?.Dispose();
+        oldOff?.Dispose();
+        return true;
+    }
+
+    /// <summary>Switching Windows between light and dark mode raises a "General" preference change.</summary>
+    private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category == UserPreferenceCategory.General && LoadIconsForTheme())
+        {
+            DiagnosticLog.Write($"Thème de la barre des tâches : {(_iconsDark == true ? "sombre" : "clair")}");
+            RefreshMenu();
+        }
+    }
+
     private void RefreshMenu()
     {
         _enabledItem.Checked = _settings.Enabled;
@@ -145,15 +175,15 @@ internal sealed class TrayApp : ApplicationContext
         _diagItem.Checked = _settings.DiagnosticLog;
 
         _tray.Icon = _settings.Enabled ? _iconOn : _iconOff;
-        string screen = MonitorInfo.HasSuperDisplay ? "tablette détectée" : "tablette non détectée";
-        _tray.Text = $"{AppInfo.DisplayName} — {(_settings.Enabled ? "actif" : "en pause")} ({screen})";
+        string screen = MonitorInfo.HasSuperDisplay ? "tablet detected" : "tablet not detected";
+        _tray.Text = $"{AppInfo.DisplayName} — {(_settings.Enabled ? "active" : "paused")} ({screen})";
     }
 
     private static void OpenLog()
     {
         DiagnosticLog.Flush();
         if (File.Exists(DiagnosticLog.FilePath)) Shell(DiagnosticLog.FilePath);
-        else MessageBox.Show("Aucun journal pour l'instant. Active d'abord « Journal de diagnostic ».", AppInfo.DisplayName);
+        else MessageBox.Show("No log yet. Turn on \"Diagnostic log\" first.", AppInfo.DisplayName);
     }
 
     private static void Shell(string path)
@@ -192,6 +222,7 @@ internal sealed class TrayApp : ApplicationContext
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.SessionSwitch -= OnSessionSwitch;
+        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
 
         _hook.Dispose();
         _rawTouch.Dispose();
@@ -200,33 +231,10 @@ internal sealed class TrayApp : ApplicationContext
         _dispatcher.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
+        _iconOn.Dispose();
+        _iconOff.Dispose();
         DiagnosticLog.Write($"=== {AppInfo.DisplayName} arrêté ===");
         DiagnosticLog.Stop();
         base.ExitThreadCore();
-    }
-
-    /// <summary>Icon drawn in code: a tablet outline, a fingertip and a return arrow.</summary>
-    private static Icon CreateIcon(bool active)
-    {
-        int size = SystemInformation.SmallIconSize.Width;
-        using var bmp = new Bitmap(size, size);
-        using (var g = Graphics.FromImage(bmp))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            float s = size / 16f;
-            var color = active ? Color.FromArgb(0, 150, 255) : Color.FromArgb(140, 140, 140);
-
-            // screen / tablet
-            using var pen = new Pen(color, 1.6f * s);
-            g.DrawRectangle(pen, 1.5f * s, 2.5f * s, 13f * s, 9.5f * s);
-            // fingertip
-            using var brush = new SolidBrush(color);
-            g.FillEllipse(brush, 9f * s, 5f * s, 4f * s, 4f * s);
-            // return arrow
-            using var arrow = new Pen(active ? Color.White : Color.Gainsboro, 1.4f * s) { EndCap = LineCap.ArrowAnchor };
-            g.DrawLine(arrow, 9f * s, 7f * s, 3.5f * s, 7f * s);
-        }
-        // One icon per state, created once at startup: leaking the HICON is negligible.
-        return Icon.FromHandle(bmp.GetHicon());
     }
 }

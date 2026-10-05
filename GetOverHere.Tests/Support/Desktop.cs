@@ -15,15 +15,24 @@ internal static class Desktop
     /// <summary>
     /// Runs the test on a dedicated STA thread, with the same DPI handling as the app (physical pixels),
     /// and rethrows any exception on the test's thread.
+    /// Real (non-injected) mouse input during the test is counted: if the test fails while the user was moving
+    /// the mouse, the failure says so, instead of looking like a bug in the app.
     /// </summary>
     public static void RunSta(Action body)
     {
         ExceptionDispatchInfo? error = null;
+        int userInput = 0;
         var thread = new Thread(() =>
         {
             try
             {
                 SetThreadDpiAwarenessContext(DpiAwarenessPerMonitorV2);
+                using var watcher = new MouseHook((int msg, in Native.MSLLHOOKSTRUCT d) =>
+                {
+                    if ((d.flags & Native.LLMHF_INJECTED) == 0) userInput++;
+                    return false;
+                });
+                watcher.Install();
                 body();
             }
             catch (Exception ex)
@@ -34,8 +43,16 @@ internal static class Desktop
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         Assert.True(thread.Join(TimeSpan.FromSeconds(30)), "Test d'intégration bloqué plus de 30 s");
+
+        if (error is not null && userInput > 0)
+            throw new UserInterferenceException(userInput, error.SourceException);
         error?.Throw();
     }
+
+    /// <summary>The test failed while the real mouse was being used: the result is not meaningful.</summary>
+    public sealed class UserInterferenceException(int events, Exception inner) : Exception(
+        $"{events} vrai(s) mouvement(s) de souris pendant le test : relancez-le sans toucher la souris. " +
+        $"Échec d'origine : {inner.Message}", inner);
 
     /// <summary>Pumps Windows messages (hooks, timers, BeginInvoke) until the condition is true.</summary>
     public static bool PumpUntil(Func<bool> condition, int timeoutMs = 2000)
