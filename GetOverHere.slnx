@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="GetOverHere.Tests/GetOverHere.Tests.csproj" />
+  <Project Path="GetOverHere/GetOverHere.csproj" />
+</Solution>

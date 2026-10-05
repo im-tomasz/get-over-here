@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Physical pixel coordinates on every monitor (required when monitors use different scale factors). -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AssemblyName>GetOverHere</AssemblyName>
+    <RootNamespace>GetOverHere</RootNamespace>
+    <Version>1.1.0</Version>
+    <Product>Get Over Here!</Product>
+    <AssemblyTitle>Get Over Here!</AssemblyTitle>
+    <Description>Keeps the mouse cursor and keyboard focus on the main screen when touching the secondary touch screen (SuperDisplay).</Description>
+    <NoWarn>$(NoWarn);SYSLIB1054</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="GetOverHere.Tests" />
+  </ItemGroup>
+
+</Project>
