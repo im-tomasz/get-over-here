@@ -11,7 +11,7 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>GetOverHere</AssemblyName>
     <RootNamespace>GetOverHere</RootNamespace>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Product>Get Over Here!</Product>
     <AssemblyTitle>Get Over Here!</AssemblyTitle>
     <Description>Keeps the mouse cursor and keyboard focus on the main screen when touching the secondary touch screen (SuperDisplay).</Description>
