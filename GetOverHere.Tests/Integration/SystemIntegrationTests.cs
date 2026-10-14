@@ -216,6 +216,31 @@ public class SystemIntegrationTests
     });
 
     [Fact]
+    public void MonitorInfo_WindowOnTheTablet_IsTheOneOnTheTouchMonitor() => RunSta(() =>
+    {
+        MonitorInfo.Refresh();
+        using var main = CreateWindow("Get Over Here test main", 0);
+
+        Assert.False(MonitorInfo.IsWindowOnTouchMonitor(IntPtr.Zero));
+        Assert.Equal(MonitorInfo.IsOnTouchMonitor(PrimaryCenter()), MonitorInfo.IsWindowOnTouchMonitor(main.Handle));
+
+        var tablet = Screen.AllScreens.FirstOrDefault(s => !s.Primary && MonitorInfo.HasSuperDisplay &&
+            MonitorInfo.IsOnTouchMonitor(P(s.Bounds.Left + s.Bounds.Width / 2, s.Bounds.Top + s.Bounds.Height / 2)));
+        if (tablet is null) return; // no tablet connected: nothing more to check
+
+        using var onTablet = new Form
+        {
+            Text = "Get Over Here test tablet",
+            StartPosition = FormStartPosition.Manual,
+            Bounds = new Rectangle(tablet.WorkingArea.Left + 50, tablet.WorkingArea.Top + 50, 300, 200),
+            ShowInTaskbar = false,
+        };
+        onTablet.Show();
+        PumpFor(50);
+        Assert.True(MonitorInfo.IsWindowOnTouchMonitor(onTablet.Handle));
+    });
+
+    [Fact]
     public void RawTouchInput_RegistersForTheTouchScreen() => RunSta(() =>
     {
         using var raw = new RawTouchInput(_ => { });

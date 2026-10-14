@@ -8,6 +8,8 @@ public class SettingsTests
     {
         Assert.True(s.Enabled);
         Assert.True(s.RestoreFocus);
+        Assert.False(s.DelayFocusReturn);
+        Assert.Equal(3000, s.FocusReturnDelayMs);
         Assert.False(s.ZeroMoveMode);
         Assert.True(s.StartWithWindows);
         Assert.False(s.DiagnosticLog);
@@ -40,6 +42,8 @@ public class SettingsTests
         {
             Enabled = false,
             RestoreFocus = false,
+            DelayFocusReturn = true,
+            FocusReturnDelayMs = 12_000,
             ZeroMoveMode = true,
             StartWithWindows = false,
             DiagnosticLog = true,
@@ -54,6 +58,8 @@ public class SettingsTests
         Assert.False(s.IsFirstRun);
         Assert.False(s.Enabled);
         Assert.False(s.RestoreFocus);
+        Assert.True(s.DelayFocusReturn);
+        Assert.Equal(12_000, s.FocusReturnDelayMs);
         Assert.True(s.ZeroMoveMode);
         Assert.False(s.StartWithWindows);
         Assert.True(s.DiagnosticLog);

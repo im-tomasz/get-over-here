@@ -30,7 +30,7 @@ internal sealed class TouchRig : IDisposable
     public TouchRig(Action<Settings>? configure = null)
     {
         configure?.Invoke(Settings);
-        Platform = new FakePlatform(Clock) { CursorPos = Start, Foreground = WinA };
+        Platform = new FakePlatform(Clock) { CursorPos = Start, Foreground = WinA, WindowsOnTablet = { WinB } };
         Timer = new FakeTimer(Clock);
 
         // Like ForegroundWatcher: the window active at launch, dated one hour back.
@@ -115,6 +115,13 @@ internal sealed class TouchRig : IDisposable
         bool blocked = Hook(Native.WM_MOUSEMOVE, pt, PenExtra);
         if (!blocked) Platform.CursorPos = pt;
         return blocked;
+    }
+
+    /// <summary>A key pressed and released, as the keyboard hook reports it.</summary>
+    public void KeyPress()
+    {
+        Guard.OnKeyboardEvent(Native.WM_KEYDOWN);
+        Guard.OnKeyboardEvent(Native.WM_KEYUP);
     }
 
     /// <summary>Raw touch-screen report.</summary>

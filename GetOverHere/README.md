@@ -14,6 +14,7 @@ A small Windows app living in the notification area. When you touch the secondar
 - **Double-click** the icon: pause / resume.
 - **Right-click** the icon for the options:
   - *Also restore keyboard focus*: the window you were typing in stays active after a touch.
+  - *Delay before focus returns*: the touched window keeps the keyboard for a cooldown chosen with the slider below it (1 to 30 s), then the focus comes back. A key pressed in a window on the tablet before the end cancels the return (the user is writing there), as do a real click or the pen; a key pressed in a main-screen window starts the cooldown over from the last key press. The keyboard is only watched during the cooldown (a `WH_KEYBOARD_LL` hook that looks at when keys are pressed, never at which ones).
   - *Zero-move mode (experimental)*: blocks the cursor moves caused by touch. Modern apps still receive the touch; some legacy apps may stop responding to it.
   - *Diagnostic log*: writes every event to `%APPDATA%\GetOverHere\diag.log`.
 
@@ -24,6 +25,8 @@ Settings: `%APPDATA%\GetOverHere\settings.json`.
 | `RestoreDelayMs` | 60 | Delay after the finger is lifted before the cursor comes back |
 | `HeldTimeoutMs` | 4000 | Restore after this much silence if the release is never seen |
 | `RawQuietMs` | 250 | End of a touch seen only through raw touch-screen reports |
+| `DelayFocusReturn` | false | Wait `FocusReturnDelayMs` before giving the focus back (menu toggle) |
+| `FocusReturnDelayMs` | 3000 | Cooldown before the focus comes back (menu slider) |
 | `FocusGuardMs` | 1500 | How long a late focus grab by the touched window is still reverted |
 
 ### Upgrading from TouchBack
@@ -43,7 +46,7 @@ Nothing expensive is done inside the mouse hook itself: Windows would stall (~30
 | File | Role |
 |---|---|
 | `TouchGuard.cs` | Core state machine: touch sessions, cursor and focus restore |
-| `MouseHook.cs`, `RawTouchInput.cs`, `ForegroundWatcher.cs` | Win32 signal sources |
+| `MouseHook.cs`, `KeyboardHook.cs`, `RawTouchInput.cs`, `ForegroundWatcher.cs` | Win32 signal sources (the keyboard hook only during the focus cooldown) |
 | `ForegroundHistory.cs` | Timestamped foreground history |
 | `OwnInput.cs`, `FocusRestorer.cs` | Cursor move and foreground switch, Win32 side |
 | `Platform.cs` | Abstractions used by `TouchGuard` (clock, timer, dispatcher, system) |

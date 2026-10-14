@@ -24,6 +24,9 @@ internal interface ITouchPlatform
     /// <summary>Is the point on the touch screen (tablet)?</summary>
     bool IsOnTouchMonitor(Native.POINT pt);
 
+    /// <summary>Is the window (mostly) on the touch screen?</summary>
+    bool IsWindowOnTouchMonitor(IntPtr hwnd);
+
     string DescribeWindow(IntPtr hwnd);
 
     string DescribeMonitor(Native.POINT pt);
@@ -62,6 +65,8 @@ internal sealed class Win32TouchPlatform : ITouchPlatform
     public bool ActivateWindow(IntPtr hwnd) => FocusRestorer.Restore(hwnd);
 
     public bool IsOnTouchMonitor(Native.POINT pt) => MonitorInfo.IsOnTouchMonitor(pt);
+
+    public bool IsWindowOnTouchMonitor(IntPtr hwnd) => MonitorInfo.IsWindowOnTouchMonitor(hwnd);
 
     public string DescribeWindow(IntPtr hwnd) => Native.WindowTitle(hwnd);
 

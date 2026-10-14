@@ -5,6 +5,12 @@ namespace GetOverHere;
 internal static class Native
 {
     public const int WH_MOUSE_LL = 14;
+    public const int WH_KEYBOARD_LL = 13;
+
+    public const int WM_KEYDOWN = 0x0100;
+    public const int WM_KEYUP = 0x0101;
+    public const int WM_SYSKEYDOWN = 0x0104;
+    public const int WM_SYSKEYUP = 0x0105;
 
     public const int WM_MOUSEMOVE = 0x0200;
     public const int WM_LBUTTONDOWN = 0x0201;
@@ -19,6 +25,7 @@ internal static class Native
     public const uint LLMHF_INJECTED = 0x01;
 
     public const uint MONITOR_DEFAULTTONULL = 0;
+    public const uint MONITOR_DEFAULTTONEAREST = 2;
     public const uint MONITORINFOF_PRIMARY = 1;
 
     public const uint INPUT_MOUSE = 0;
@@ -105,7 +112,18 @@ internal static class Native
         public MOUSEINPUT mi;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KBDLLHOOKSTRUCT
+    {
+        public uint vkCode;
+        public uint scanCode;
+        public uint flags;
+        public uint time;
+        public nuint dwExtraInfo;
+    }
+
     public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+    public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
     public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdc, IntPtr lprcMonitor, IntPtr dwData);
     public const int WM_INPUT = 0x00FF;
     public const uint RIDEV_INPUTSINK = 0x00000100;
@@ -145,6 +163,9 @@ internal static class Native
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -201,6 +222,9 @@ internal static class Native
 
     [DllImport("user32.dll")]
     public static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]

@@ -60,9 +60,15 @@ internal static class MonitorInfo
         superDisplayMonitors.Count == 0 || superDisplayMonitors.Contains(hMonitor);
 
     /// <summary>Is the point on the tablet? (If no SuperDisplay monitor is found, accept: the PC has no other touch screen.)</summary>
-    public static bool IsOnTouchMonitor(Native.POINT pt)
+    public static bool IsOnTouchMonitor(Native.POINT pt) =>
+        IsKnownTouchMonitor(Native.MonitorFromPoint(pt, Native.MONITOR_DEFAULTTONULL));
+
+    /// <summary>Is the window (mostly) on the tablet? Same fallback as <see cref="IsOnTouchMonitor"/>.</summary>
+    public static bool IsWindowOnTouchMonitor(IntPtr hwnd) =>
+        hwnd != IntPtr.Zero && IsKnownTouchMonitor(Native.MonitorFromWindow(hwnd, Native.MONITOR_DEFAULTTONEAREST));
+
+    private static bool IsKnownTouchMonitor(IntPtr hMon)
     {
-        var hMon = Native.MonitorFromPoint(pt, Native.MONITOR_DEFAULTTONULL);
         var snap = _snapshot;
         if (hMon != IntPtr.Zero && !snap.Names.ContainsKey(hMon) && Environment.TickCount64 - _lastRefreshTicks > 2000)
         {

@@ -109,6 +109,49 @@ internal static class Desktop
         Assert.Equal(1u, Native.SendInput(1, input, Marshal.SizeOf<Native.INPUT>()));
     }
 
+    // Keyboard flavour of INPUT (the app's Native.INPUT only declares the mouse one). The padding brings it to the
+    // size of the whole union, which SendInput checks.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT
+    {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public nuint dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KeyboardInput
+    {
+        public uint type;
+        public KEYBDINPUT ki;
+        private ulong _padding;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint nInputs, KeyboardInput[] pInputs, int cbSize);
+
+    private const uint INPUT_KEYBOARD = 1;
+    private const uint KEYEVENTF_KEYUP = 0x0002;
+
+    /// <summary>
+    /// Unassigned virtual-key code: delivered to the foreground window like any key, but no app reacts to it.
+    /// </summary>
+    public const ushort HarmlessKey = 0xE8;
+
+    /// <summary>Injects a press and release of <see cref="HarmlessKey"/>, with the given dwExtraInfo.</summary>
+    public static void InjectHarmlessKeyPress(uint extraInfo)
+    {
+        Assert.Equal(Marshal.SizeOf<Native.INPUT>(), Marshal.SizeOf<KeyboardInput>());
+        var input = new[]
+        {
+            new KeyboardInput { type = INPUT_KEYBOARD, ki = new KEYBDINPUT { wVk = HarmlessKey, dwExtraInfo = extraInfo } },
+            new KeyboardInput { type = INPUT_KEYBOARD, ki = new KEYBDINPUT { wVk = HarmlessKey, dwFlags = KEYEVENTF_KEYUP, dwExtraInfo = extraInfo } },
+        };
+        Assert.Equal(2u, SendInput(2, input, Marshal.SizeOf<KeyboardInput>()));
+    }
+
     /// <summary>Center of the main screen, in physical pixels.</summary>
     public static Native.POINT PrimaryCenter()
     {

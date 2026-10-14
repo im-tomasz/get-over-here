@@ -96,6 +96,11 @@ internal sealed class FakePlatform(FakeClock clock) : ITouchPlatform
 
     public bool IsOnTouchMonitor(Native.POINT pt) => pt.X < 0;
 
+    /// <summary>Windows placed on the tablet (the others are on the main screen).</summary>
+    public HashSet<IntPtr> WindowsOnTablet { get; } = new();
+
+    public bool IsWindowOnTouchMonitor(IntPtr hwnd) => WindowsOnTablet.Contains(hwnd);
+
     public string DescribeWindow(IntPtr hwnd) => $"fenêtre 0x{hwnd:X}";
 
     public string DescribeMonitor(Native.POINT pt) => pt.X < 0 ? "tablette" : "principal";

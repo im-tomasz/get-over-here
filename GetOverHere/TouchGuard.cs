@@ -31,12 +31,15 @@ internal sealed class TouchGuard : IDisposable
     private readonly ForegroundHistory _history;
     private readonly ITouchPlatform _platform;
     private readonly IDispatcher _dispatcher;
-    private readonly IOneShotTimer _restoreTimer;
+    // During a touch: end of the touch. Between touches: end of the cooldown before the focus comes back.
+    private readonly IOneShotTimer _timer;
 
     private bool _active;      // touch session in progress
     private bool _hijacked;    // Windows moved the cursor onto the tablet during this session
     private bool _buttonDown;
     private bool _restorePosted;
+    private bool _focusReturnPending; // cursor restored, focus given back when the cooldown ends
+    private int _keysDuringCooldown;
 
     // Last position set by the real mouse (or the pen): this is where the cursor is brought back.
     private Native.POINT _anchor;
@@ -49,15 +52,15 @@ internal sealed class TouchGuard : IDisposable
     private int _rawReports;
 
     public TouchGuard(Settings settings, ForegroundHistory history, ITouchPlatform platform,
-                      IDispatcher dispatcher, IOneShotTimer restoreTimer)
+                      IDispatcher dispatcher, IOneShotTimer timer)
     {
         _settings = settings;
         _history = history;
         _platform = platform;
         _dispatcher = dispatcher;
-        _restoreTimer = restoreTimer;
+        _timer = timer;
         _anchor = platform.GetCursorPos();
-        _restoreTimer.Elapsed += () => Restore("fin du toucher");
+        _timer.Elapsed += OnTimerElapsed;
     }
 
     // Exposed for tests and diagnostics.
@@ -66,6 +69,28 @@ internal sealed class TouchGuard : IDisposable
     internal Native.POINT Anchor => _anchor;
     internal IntPtr SavedForeground => _savedForeground;
     internal bool IsFocusGuardActive => _platform.TickCount64 < _focusGuardUntil;
+    internal bool IsFocusReturnPending => _focusReturnPending;
+
+    /// <summary>
+    /// Raised when a cooldown starts or ends (see <see cref="IsFocusReturnPending"/>): the keyboard only needs
+    /// to be watched meanwhile. May be raised from inside the mouse hook: handlers must only post work.
+    /// </summary>
+    public event Action? FocusReturnPendingChanged;
+
+    private bool FocusReturnPending
+    {
+        set
+        {
+            if (_focusReturnPending == value) return;
+            _focusReturnPending = value;
+            _keysDuringCooldown = 0;
+            FocusReturnPendingChanged?.Invoke();
+        }
+    }
+
+    /// <summary>Cooldown applied after a touch before the focus comes back (0 = immediately).</summary>
+    private int FocusReturnDelay =>
+        _settings.DelayFocusReturn && _settings.RestoreFocus ? Math.Max(0, _settings.FocusReturnDelayMs) : 0;
 
     // ───────────────────────── Touch signals ─────────────────────────
 
@@ -102,7 +127,7 @@ internal sealed class TouchGuard : IDisposable
             case Source.Pen:
                 if (_active) Cancel();
                 _anchor = data.pt;
-                _focusGuardUntil = 0;
+                EndFocusGuard();
                 return false;
 
             default: // our own injected input
@@ -149,7 +174,7 @@ internal sealed class TouchGuard : IDisposable
         if (IsButtonDown(msg))
         {
             _lastRealClickTime = unchecked((int)data.time);
-            if (!_active) _focusGuardUntil = 0; // real click: the focus change that follows is intended
+            if (!_active) EndFocusGuard(); // real click: the focus change that follows is intended
         }
 
         if (!_active)
@@ -187,6 +212,7 @@ internal sealed class TouchGuard : IDisposable
         _buttonDown = false;
         _rawReports = 0;
         _savedPos = _anchor;
+        FocusReturnPending = false; // the end of this touch starts a new cooldown
 
         // Chained touch during the focus guard: keep the original window already remembered.
         bool chained = IsFocusGuardActive && _savedForeground != IntPtr.Zero && _platform.IsWindow(_savedForeground);
@@ -208,7 +234,7 @@ internal sealed class TouchGuard : IDisposable
         int delay = _buttonDown ? _settings.HeldTimeoutMs
                   : _hijacked ? _settings.RestoreDelayMs
                   : _settings.RawQuietMs;
-        _restoreTimer.Start(Math.Max(1, delay));
+        _timer.Start(Math.Max(1, delay));
     }
 
     private void PostRestore(string reason)
@@ -224,8 +250,8 @@ internal sealed class TouchGuard : IDisposable
 
     private void Restore(string reason)
     {
-        _restoreTimer.Stop();
-        if (!_active) return;
+        if (!_active) return; // the timer may be counting the focus cooldown: leave it alone
+        _timer.Stop();
         _active = false;
         _buttonDown = false;
 
@@ -236,17 +262,81 @@ internal sealed class TouchGuard : IDisposable
         _anchor = _savedPos;
         Log(() => $"  -> retour ({reason}, {_rawReports} rapports bruts) curseur {before} -> {_savedPos}");
 
+        int delay = FocusReturnDelay;
+        if (delay > 0)
+        {
+            // The touched window keeps the keyboard during the cooldown; the guard then covers late grabs as usual.
+            FocusReturnPending = true;
+            _focusGuardUntil = _platform.TickCount64 + delay + _settings.FocusGuardMs;
+            _timer.Start(delay);
+            Log(() => $"  -> focus rendu dans {delay} ms");
+            return;
+        }
+
         _focusGuardUntil = _platform.TickCount64 + _settings.FocusGuardMs;
         EnsureFocus();
     }
 
+    private void OnTimerElapsed()
+    {
+        if (_active)
+        {
+            Restore("fin du toucher");
+        }
+        else if (_focusReturnPending)
+        {
+            int keys = _keysDuringCooldown;
+            FocusReturnPending = false;
+            Log(() => $"  -> fin du délai ({keys} frappes clavier), retour du focus");
+            EnsureFocus();
+        }
+    }
+
+    /// <summary>
+    /// Keyboard hook event, during the cooldown only.
+    ///  - Typing in a window on the tablet (e.g. a Discord message): the user wants to stay there, however long
+    ///    they think before the first key. The return is cancelled.
+    ///  - Typing elsewhere: the cooldown starts over from the last key press, so the focus is never taken away
+    ///    in the middle of a sentence.
+    /// </summary>
+    public void OnKeyboardEvent(int msg)
+    {
+        if (!_focusReturnPending || msg is not (Native.WM_KEYDOWN or Native.WM_SYSKEYDOWN)) return;
+
+        var current = _platform.GetForegroundWindow();
+        if (current != _savedForeground && _platform.IsWindowOnTouchMonitor(current))
+        {
+            Log(() => $"  -> frappe clavier dans {_platform.DescribeWindow(current)} (tablette)");
+            EndFocusGuard();
+            return;
+        }
+
+        int delay = FocusReturnDelay;
+        if (delay <= 0) return; // option turned off meanwhile: let the current countdown end
+
+        _keysDuringCooldown++;
+        _focusGuardUntil = _platform.TickCount64 + delay + _settings.FocusGuardMs;
+        _timer.Start(delay);
+    }
+
     private void Cancel()
     {
-        _restoreTimer.Stop();
+        _timer.Stop();
         _active = false;
         _hijacked = false;
         _buttonDown = false;
+        FocusReturnPending = false;
         _focusGuardUntil = 0;
+    }
+
+    /// <summary>The user picked a window themselves (real click, pen): stop correcting the focus for this touch.</summary>
+    private void EndFocusGuard()
+    {
+        _focusGuardUntil = 0;
+        if (!_focusReturnPending) return;
+        FocusReturnPending = false;
+        _timer.Stop();
+        Log(() => "  -> retour du focus annulé");
     }
 
     /// <summary>Called when the app is disabled: cleanly ends a touch in progress.</summary>
@@ -258,10 +348,11 @@ internal sealed class TouchGuard : IDisposable
     public void OnForegroundChanged(IntPtr hwnd)
     {
         bool guarded = IsFocusGuardActive;
-        Log(() => $"PREMIER PLAN -> {_platform.DescribeWindow(hwnd)}{(guarded ? $" (garde active{(_active ? ", toucher en cours" : "")})" : "")}");
+        Log(() => $"PREMIER PLAN -> {_platform.DescribeWindow(hwnd)}{(guarded ? $" (garde active{(_active ? ", toucher en cours" : _focusReturnPending ? ", retour différé" : "")})" : "")}");
 
-        // During the touch, Restore() takes care of it; afterwards, correct as long as the guard is active.
-        if (guarded && !_active) EnsureFocus();
+        // During the touch, Restore() takes care of it; during the cooldown, the timer does;
+        // afterwards, correct as long as the guard is active.
+        if (guarded && !_active && !_focusReturnPending) EnsureFocus();
     }
 
     private void EnsureFocus()
@@ -320,5 +411,5 @@ internal sealed class TouchGuard : IDisposable
         _ => $"0x{msg:X}",
     };
 
-    public void Dispose() => _restoreTimer.Dispose();
+    public void Dispose() => _timer.Dispose();
 }

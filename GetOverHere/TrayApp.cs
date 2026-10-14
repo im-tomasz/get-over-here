@@ -9,6 +9,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly Settings _settings;
     private readonly TouchGuard _guard;
     private readonly MouseHook _hook;
+    private readonly KeyboardHook _keyboard; // installed only during the focus cooldown
     private readonly ForegroundWatcher _foreground;
     private readonly RawTouchInput _rawTouch;
     private readonly ControlDispatcher _dispatcher;
@@ -19,7 +20,16 @@ internal sealed class TrayApp : ApplicationContext
 
     private readonly ToolStripMenuItem _enabledItem;
     private readonly ToolStripMenuItem _focusItem;
+    private readonly ToolStripMenuItem _focusDelayItem;
+    private readonly ToolStripControlHost _focusDelayRow;
+    private readonly TrackBar _focusDelaySlider;
+    private readonly Label _focusDelayLabel;
+    private bool _focusDelayDirty; // slider moved: saved when the menu closes, not on every step
     private readonly ToolStripMenuItem _zeroMoveItem;
+
+    // Range of the focus cooldown slider, in seconds.
+    internal const int MinFocusDelaySeconds = 1;
+    internal const int MaxFocusDelaySeconds = 30;
     private readonly ToolStripMenuItem _startupItem;
     private readonly ToolStripMenuItem _diagItem;
 
@@ -56,10 +66,17 @@ internal sealed class TrayApp : ApplicationContext
         _foreground.Changed += _guard.OnForegroundChanged;
         _hook = new MouseHook(_guard.OnMouseEvent);
         _hook.Install();
+        _keyboard = new KeyboardHook((int msg, in Native.KBDLLHOOKSTRUCT _) => _guard.OnKeyboardEvent(msg));
+        _guard.FocusReturnPendingChanged += () => _dispatcher.Post(UpdateKeyboardHook);
         _rawTouch = new RawTouchInput(_guard.OnRawTouch);
 
         _enabledItem = new ToolStripMenuItem("Enabled", null, (_, _) => ToggleEnabled()) { Font = new Font(SystemFonts.MenuFont!, FontStyle.Bold) };
         _focusItem = new ToolStripMenuItem("Also restore keyboard focus", null, (_, _) => Toggle(s => s.RestoreFocus = !s.RestoreFocus));
+        _focusDelayItem = new ToolStripMenuItem("Delay before focus returns", null, (_, _) => Toggle(s => s.DelayFocusReturn = !s.DelayFocusReturn))
+        {
+            ToolTipText = "The touched window keeps the keyboard for the time chosen below,\nthen the focus comes back. Start typing in a tablet window before the end\nand the focus stays there. The cursor still comes back right away.",
+        };
+        (_focusDelayRow, _focusDelaySlider, _focusDelayLabel) = CreateFocusDelayRow();
         _zeroMoveItem = new ToolStripMenuItem("Zero-move mode (experimental)", null, (_, _) => Toggle(s => s.ZeroMoveMode = !s.ZeroMoveMode))
         {
             ToolTipText = "Blocks cursor moves caused by touch.\nModern apps still receive the touch, some older apps may not.",
@@ -73,6 +90,8 @@ internal sealed class TrayApp : ApplicationContext
             _enabledItem,
             new ToolStripSeparator(),
             _focusItem,
+            _focusDelayItem,
+            _focusDelayRow,
             _zeroMoveItem,
             _startupItem,
             new ToolStripSeparator(),
@@ -83,6 +102,12 @@ internal sealed class TrayApp : ApplicationContext
             new ToolStripMenuItem("Quit", null, (_, _) => ExitThread()),
         });
         menu.Opening += (_, _) => RefreshMenu();
+        menu.Closed += (_, _) =>
+        {
+            if (!_focusDelayDirty) return;
+            _focusDelayDirty = false;
+            _settings.Save();
+        };
 
         _tray = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
         _tray.MouseDoubleClick += (_, e) => { if (e.Button == MouseButtons.Left) ToggleEnabled(); };
@@ -111,6 +136,60 @@ internal sealed class TrayApp : ApplicationContext
     {
         change(_settings);
         SaveAndRefresh();
+    }
+
+    /// <summary>Menu row holding the cooldown slider and its value, indented under "Delay before focus returns".</summary>
+    private (ToolStripControlHost Row, TrackBar Slider, Label Value) CreateFocusDelayRow()
+    {
+        var back = ProfessionalColors.ToolStripDropDownBackground; // blends the row into the menu
+        var slider = new TrackBar
+        {
+            Minimum = MinFocusDelaySeconds,
+            Maximum = MaxFocusDelaySeconds,
+            SmallChange = 1,
+            LargeChange = 5,
+            TickStyle = TickStyle.None,
+            AutoSize = false,
+            BackColor = back,
+        };
+        var value = new Label { AutoSize = false, TextAlign = ContentAlignment.MiddleLeft, BackColor = back };
+        var panel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            BackColor = back,
+        };
+
+        // Hosted controls are not scaled by the menu: size them for the current DPI.
+        slider.Size = new Size(panel.LogicalToDeviceUnits(150), panel.LogicalToDeviceUnits(28));
+        value.Size = new Size(panel.LogicalToDeviceUnits(40), slider.Height);
+        slider.Margin = value.Margin = Padding.Empty;
+        panel.Padding = new Padding(panel.LogicalToDeviceUnits(24), 0, 0, 0);
+        panel.Controls.Add(slider);
+        panel.Controls.Add(value);
+
+        slider.ValueChanged += (_, _) =>
+        {
+            value.Text = $"{slider.Value} s";
+            int ms = slider.Value * 1000;
+            if (ms == _settings.FocusReturnDelayMs) return; // set by RefreshMenu
+            _settings.FocusReturnDelayMs = ms; // applies to the next touch right away
+            _focusDelayDirty = true;
+        };
+
+        var row = new ToolStripControlHost(panel)
+        {
+            ToolTipText = "How long the touched window keeps the keyboard before the focus comes back.",
+        };
+        return (row, slider, value);
+    }
+
+    /// <summary>Keystrokes only matter during the cooldown: the keyboard is not watched the rest of the time.</summary>
+    private void UpdateKeyboardHook()
+    {
+        if (_guard.IsFocusReturnPending) _keyboard.Install();
+        else _keyboard.Uninstall();
     }
 
     private void ToggleStartup()
@@ -170,6 +249,12 @@ internal sealed class TrayApp : ApplicationContext
     {
         _enabledItem.Checked = _settings.Enabled;
         _focusItem.Checked = _settings.RestoreFocus;
+        _focusDelayItem.Checked = _settings.DelayFocusReturn;
+        _focusDelayItem.Enabled = _settings.RestoreFocus;
+        _focusDelayRow.Enabled = _settings.RestoreFocus && _settings.DelayFocusReturn;
+        int seconds = (int)Math.Round(_settings.FocusReturnDelayMs / 1000.0);
+        _focusDelaySlider.Value = Math.Clamp(seconds, MinFocusDelaySeconds, MaxFocusDelaySeconds);
+        _focusDelayLabel.Text = $"{_focusDelaySlider.Value} s";
         _zeroMoveItem.Checked = _settings.ZeroMoveMode;
         _startupItem.Checked = Startup.Default.IsEnabled();
         _diagItem.Checked = _settings.DiagnosticLog;
@@ -225,6 +310,7 @@ internal sealed class TrayApp : ApplicationContext
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
 
         _hook.Dispose();
+        _keyboard.Dispose();
         _rawTouch.Dispose();
         _guard.Dispose();
         _foreground.Dispose();

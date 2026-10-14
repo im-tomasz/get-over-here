@@ -19,6 +19,15 @@ internal sealed class Settings
     /// <summary>Also bring back to the foreground the window that had the focus before the touch.</summary>
     public bool RestoreFocus { get; set; } = true;
 
+    /// <summary>
+    /// Wait <see cref="FocusReturnDelayMs"/> before giving the focus back, so the touched window can be used
+    /// from the keyboard for a moment (the cursor still comes back right away).
+    /// </summary>
+    public bool DelayFocusReturn { get; set; }
+
+    /// <summary>Cooldown before the focus comes back when <see cref="DelayFocusReturn"/> is on (slider in the menu).</summary>
+    public int FocusReturnDelayMs { get; set; } = 3000;
+
     /// <summary>Experimental: block the mouse moves Windows generates from touch, so the cursor never leaves.</summary>
     public bool ZeroMoveMode { get; set; }
 
